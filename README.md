@@ -19,56 +19,56 @@ AND
 
 This behavior is typical when:
 
-Liquidity is silently pulled out
+- Liquidity is silently pulled out
 
-Liquidity is moved to a private or malicious pool
+- Liquidity is moved to a private or malicious pool
 
-A price manipulation attack is being prepared
+- A price manipulation attack is being prepared
 
-An MEV-driven liquidity snipe is happening
+- An MEV-driven liquidity snipe is happening
 
-A stealth rug is being set up
+- A stealth rug is being set up
 
 🧠 How It Works
 
 Every Drosera cycle, the trap:
 
-Reads liquidity from each configured pool
+1.  Reads liquidity from each configured pool
 
-For Uniswap V2: uses getReserves()
+- For Uniswap V2: uses getReserves()
 
-For Uniswap V3: uses liquidity()
+- For Uniswap V3: uses liquidity()
 
-Builds a snapshot of:
+2. Builds a snapshot of:
 
-block number
+- block number
 
-timestamp
+- timestamp
 
-pool list
+- pool list
 
-liquidity values
+- liquidity values
 
-Compares the most recent two snapshots.
+3. Compares the most recent two snapshots.
 
-Computes:
+4. Computes:
 
-primary pool drop percentage
+- primary pool drop percentage
 
-other pools liquidity increase percentage
+- other pools liquidity increase percentage
 
-compensation ratio
+- compensation ratio
 (did liquidity migrate, or vanish?)
 
-Fires when:
+5. Fires when:
 
-primary liquidity drops ≥ threshold (default: 40%)
+- primary liquidity drops ≥ threshold (default: 40%)
 
-AND other pools fail to compensate (< 50%)
+- AND other pools fail to compensate (< 50%)
 
-AND total liquidity was above a safety threshold
+- AND total liquidity was above a safety threshold
 
-AND enough blocks passed (confirm window)
+- AND enough blocks passed (confirm window)
 
 When triggered, the trap sends a payload to your response contract, which emits a clean event for off-chain monitoring.
 
@@ -76,17 +76,17 @@ When triggered, the trap sends a payload to your response contract, which emits 
 
 Liquidity migration attacks are common precursors to:
 
-Price manipulation
+- Price manipulation
 
-MEV extraction
+- MEV extraction
 
-Front-run / back-run opportunities
+- Front-run / back-run opportunities
 
-“Liquidity vanish” rugs
+- “Liquidity vanish” rugs
 
-Draining of LP positions
+- Draining of LP positions
 
-Oracle manipulation setups
+- Oracle manipulation setups
 
 Most protocols don’t monitor cross-DEX liquidity movements.
 
