@@ -1,0 +1,17 @@
+ethereum_rpc = "https://rpc.mevblocker.io"
+
+[network]
+drosera_address = "0x01C344b8406c3237a6b9dbd06ef2832142866d87"
+
+[traps.multi_dex_liquidity]
+path = "out/MultiDexLiquidityTrap.sol/MultiDexLiquidityTrap.json"
+contract_name = "MultiDexLiquidityTrap"
+response_contract = "0x0fB4614A9A2299C92F82E01B89aebB86E40df4A4"
+response_function = "respondToLiquidityAlert(bytes)"
+cooldown_period_blocks = 1
+min_number_of_operators = 1
+max_number_of_operators = 5
+block_sample_size = 2
+private_trap = true
+whitelist = ["0x8944e2090Ccbce53dEc8F503126ca04A43D8CDE2"]
+
