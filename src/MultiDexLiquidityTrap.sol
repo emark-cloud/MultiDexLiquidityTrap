@@ -60,8 +60,7 @@ contract MultiDexLiquidityTrap is ITrap {
     /* -------------------------------------------------------------------------- */
 
     constructor() {
-        // Drosera deploys using address(0) → so we assign owner AFTER deployment.
-        // Whoever calls setOwner() first becomes the owner.
+        
         owner = address(0);
     }
 
