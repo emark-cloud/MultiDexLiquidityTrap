@@ -16,7 +16,7 @@ interface IUniswapV3Pool {
  * @notice Detects cross-DEX liquidity migration from a primary pool to others.
  * @dev Designed to be Drosera-compliant:
  *      - collect() may read on-chain state
- *      - shouldRespond() MUST be pure and only use the provided data
+ *      - shouldRespond() / shouldAlert() MUST be pure
  */
 contract MultiDexLiquidityTrap is ITrap {
     /* -------------------------------------------------------------------------- */
@@ -36,18 +36,16 @@ contract MultiDexLiquidityTrap is ITrap {
 
     uint256 public constant MAX_POOLS = 8;
 
-    // Thresholds are constants so shouldRespond() can remain pure
-    uint256 public constant DROP_THRESHOLD_PCT = 40;          // minimum % drop in primary liquidity
-    uint256 public constant COMPENSATION_THRESHOLD_PCT = 50;  // required % compensation from other pools
-    uint256 public constant MIN_TOTAL_LIQUIDITY = 1;          // minimal total liquidity to consider
-    uint256 public constant MIN_CONFIRM_BLOCKS = 2;           // minimal block gap between snapshots
+    uint256 public constant DROP_THRESHOLD_PCT = 40;
+    uint256 public constant COMPENSATION_THRESHOLD_PCT = 50;
+    uint256 public constant MIN_TOTAL_LIQUIDITY = 1;
+    uint256 public constant MIN_CONFIRM_BLOCKS = 2;
 
     /* -------------------------------------------------------------------------- */
     /*                               Trap Storage                                 */
     /* -------------------------------------------------------------------------- */
 
-    // Used by collect() only. shouldRespond() uses only encoded snapshots.
-    address[] public pools; // pools[0] is treated as the primary pool in snapshots
+    address[] public pools; // pools[0] = primary pool
 
     /* -------------------------------------------------------------------------- */
     /*                                   Events                                   */
@@ -60,14 +58,9 @@ contract MultiDexLiquidityTrap is ITrap {
     /* -------------------------------------------------------------------------- */
 
     constructor() {
-        // Drosera deploys using a special environment; we cannot rely on msg.sender here.
-        // We allow the real owner to claim ownership once via setOwner().
         owner = address(0);
     }
 
-    /**
-     * @notice One-time owner setup. First caller sets the owner.
-     */
     function setOwner(address newOwner) external {
         require(owner == address(0), "OWNER_ALREADY_SET");
         require(newOwner != address(0), "ZERO_OWNER");
@@ -78,11 +71,6 @@ contract MultiDexLiquidityTrap is ITrap {
     /*                                  COLLECT                                   */
     /* -------------------------------------------------------------------------- */
 
-    /**
-     * @notice Snapshot current liquidity across configured pools.
-     * @dev Returns ABI-encoded:
-     *      (uint64 timestamp, uint256 blockNumber, address[] pools, uint256[] perPoolLiquidity)
-     */
     function collect() external view override returns (bytes memory) {
         uint256 length = pools.length;
 
@@ -103,75 +91,103 @@ contract MultiDexLiquidityTrap is ITrap {
     /*                               SHOULD RESPOND                               */
     /* -------------------------------------------------------------------------- */
 
-    /**
-     * @notice Decide whether to trigger a response based on two snapshots.
-     * @dev MUST be pure for Drosera. It only uses the provided `data` argument.
-     *
-     *      Expects:
-     *      - data[0] = newest snapshot
-     *      - data[1] = previous snapshot
-     *
-     *      Each snapshot is encoded as:
-     *      (uint64 timestamp, uint256 blockNumber, address[] pools, uint256[] perPoolLiquidity)
-     *
-     *      The logic:
-     *      - Compute drop % in primary pool (index 0)
-     *      - Compute total liquidity before/after
-     *      - Compute how much "other pools" (non-primary) increased
-     *      - If primary drop >= DROP_THRESHOLD_PCT and other pools do NOT compensate
-     *        at least COMPENSATION_THRESHOLD_PCT of that drop, we trigger.
-     */
     function shouldRespond(bytes[] calldata data)
         external
         pure
         override
         returns (bool, bytes memory)
     {
+        return _evaluate(data);
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*                                SHOULD ALERT                                */
+    /* -------------------------------------------------------------------------- */
+
+    /**
+     * @notice Used by Drosera Alerts (Slack, webhooks, UI)
+     */
+    function shouldAlert(bytes[] calldata data)
+        external
+        pure
+        returns (bool, bytes memory)
+    {
+        return _evaluate(data);
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*                         ALERT OUTPUT DECODER                                */
+    /* -------------------------------------------------------------------------- */
+
+    /**
+     * @notice Decodes alert payload for Slack / webhook formatting
+     */
+    function decodeAlertOutput(bytes calldata data)
+        public
+        pure
+        returns (
+            address primaryPool,
+            uint256 blockNumber,
+            uint256 currTotal,
+            uint256 currPrimary,
+            uint256 dropPct,
+            uint256 otherIncreasePct,
+            uint64 timestamp
+        )
+    {
+        return abi.decode(
+            data,
+            (address, uint256, uint256, uint256, uint256, uint256, uint64)
+        );
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*                         SHARED EVALUATION LOGIC                             */
+    /* -------------------------------------------------------------------------- */
+
+    function _evaluate(bytes[] calldata data)
+        private
+        pure
+        returns (bool, bytes memory)
+    {
         if (data.length < 2) return (false, "");
 
         (
-            uint64 ts_new,
-            uint256 blk_new,
-            address[] memory pools_new,
-            uint256[] memory liqs_new
+            uint64 tsNew,
+            uint256 blkNew,
+            address[] memory poolsNew,
+            uint256[] memory liqsNew
         ) = abi.decode(data[0], (uint64, uint256, address[], uint256[]));
 
         (
             ,
-            uint256 blk_prev,
-            address[] memory pools_prev,
-            uint256[] memory liqs_prev
+            uint256 blkPrev,
+            ,
+            uint256[] memory liqsPrev
         ) = abi.decode(data[1], (uint64, uint256, address[], uint256[]));
 
-        if (pools_new.length == 0 || pools_prev.length == 0) return (false, "");
-        if (pools_new.length != pools_prev.length) return (false, "");
-        if (liqs_new.length != liqs_prev.length) return (false, "");
+        if (liqsPrev.length == 0 || liqsNew.length != liqsPrev.length) {
+            return (false, "");
+        }
 
-        uint256 length = liqs_prev.length;
+        uint256 prevTotal;
+        uint256 currTotal;
 
-        uint256 prevTotal = 0;
-        uint256 currTotal = 0;
-
-        for (uint256 i = 0; i < length; i++) {
-            prevTotal += liqs_prev[i];
-            currTotal += liqs_new[i];
+        for (uint256 i = 0; i < liqsPrev.length; i++) {
+            prevTotal += liqsPrev[i];
+            currTotal += liqsNew[i];
         }
 
         if (prevTotal < MIN_TOTAL_LIQUIDITY) return (false, "");
-        if (blk_new < blk_prev + MIN_CONFIRM_BLOCKS) return (false, "");
+        if (blkNew < blkPrev + MIN_CONFIRM_BLOCKS) return (false, "");
 
-        uint256 prevPrimary = liqs_prev[0];
-        uint256 currPrimary = liqs_new[0];
+        uint256 prevPrimary = liqsPrev[0];
+        uint256 currPrimary = liqsNew[0];
 
-        if (prevPrimary == 0) return (false, "");
+        if (prevPrimary == 0 || currPrimary >= prevPrimary) return (false, "");
 
-        uint256 dropPct = 0;
-        if (currPrimary < prevPrimary) {
-            dropPct = ((prevPrimary - currPrimary) * 100) / prevPrimary;
-        } else {
-            // primary liquidity didn't drop → no suspicious migration
-            return (false, "");
-        }
+        uint256 dropPct =
+            ((prevPrimary - currPrimary) * 100) / prevPrimary;
 
         if (dropPct < DROP_THRESHOLD_PCT) return (false, "");
 
@@ -180,26 +196,23 @@ contract MultiDexLiquidityTrap is ITrap {
 
         uint256 otherIncreasePct = 0;
         if (prevOther > 0 && currOther > prevOther) {
-            otherIncreasePct = ((currOther - prevOther) * 100) / prevOther;
+            otherIncreasePct =
+                ((currOther - prevOther) * 100) / prevOther;
         }
 
-        // How much of the primary drop was compensated by other pools?
-        uint256 compensationPct = dropPct > 0
-            ? (otherIncreasePct * 100) / dropPct
-            : 0;
+        uint256 compensationPct =
+            (otherIncreasePct * 100) / dropPct;
 
-        // If other pools compensated ≥ threshold, consider it benign migration.
         if (compensationPct >= COMPENSATION_THRESHOLD_PCT) return (false, "");
 
-        // Otherwise, treat as suspicious liquidity disappearance.
         bytes memory payload = abi.encode(
-            pools_new[0],    // primary pool
-            blk_new,         // block
-            currTotal,       // total current liquidity
-            currPrimary,     // current primary liquidity
-            dropPct,         // primary drop %
-            otherIncreasePct,// other pools increase %
-            ts_new           // timestamp
+            poolsNew[0],
+            blkNew,
+            currTotal,
+            currPrimary,
+            dropPct,
+            otherIncreasePct,
+            tsNew
         );
 
         return (true, payload);
@@ -209,10 +222,6 @@ contract MultiDexLiquidityTrap is ITrap {
     /*                              ADMIN FUNCTIONS                               */
     /* -------------------------------------------------------------------------- */
 
-    /**
-     * @notice Configure which pools are monitored.
-     * @dev Only callable by the owner after ownership is set.
-     */
     function updatePools(address[] calldata _pools) external onlyOwner {
         require(_pools.length > 0 && _pools.length <= MAX_POOLS, "invalid pools");
         pools = _pools;
@@ -228,17 +237,18 @@ contract MultiDexLiquidityTrap is ITrap {
         view
         returns (uint256)
     {
-        // Try Uniswap V2-style pair
-        try IUniswapV2Pair(pool).getReserves() returns (uint112 r0, uint112 r1, uint32) {
+        try IUniswapV2Pair(pool).getReserves()
+            returns (uint112 r0, uint112 r1, uint32)
+        {
             return uint256(r0) + uint256(r1);
         } catch {}
 
-        // Try Uniswap V3-style pool
-        try IUniswapV3Pool(pool).liquidity() returns (uint128 L) {
+        try IUniswapV3Pool(pool).liquidity()
+            returns (uint128 L)
+        {
             return uint256(L);
         } catch {}
 
-        // If both calls fail, treat liquidity as 0
         return 0;
     }
 }
