@@ -14,6 +14,7 @@ max_number_of_operators = 5
 block_sample_size = 2
 private_trap = true
 whitelist = ["0x8944e2090Ccbce53dEc8F503126ca04A43D8CDE2"]
+address = "0x9ae5683e8760a7612f4418fd565d59ed57217ba7"
 
 [traps.multi_dex_liquidity.alert]
 title = "Suspicious Liquidity Disappearance Detected"
