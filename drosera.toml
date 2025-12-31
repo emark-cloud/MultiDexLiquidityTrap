@@ -15,3 +15,12 @@ block_sample_size = 2
 private_trap = true
 whitelist = ["0x8944e2090Ccbce53dEc8F503126ca04A43D8CDE2"]
 
+[traps.multi_dex_liquidity.alert]
+title = "Suspicious Liquidity Disappearance Detected"
+severity = "critical"
+enabled = true
+alert_output_sig = "decodeAlertOutput"
+slack = { slack_channel = "#security-alerts" }
+users = [{ address = "0x8944e2090Ccbce53dEc8F503126ca04A43D8CDE2" }]
+
+
